@@ -13,7 +13,7 @@ void* movingptr=NULL; // points to header
 typedef union {
     struct{
         size_t size;  // size of the payload, lowest bit is used as a flag to indicate if the block is allocated or not
-    }s;
+    };// anonymous struct
     max_align_t _align; // ensures that the header is aligned to the maximum alignment requirement of the system
 }header_u;
 static int allocator_init(void){     // static means only this file can use this as its a helper function
@@ -71,5 +71,15 @@ void * myalloc(size_t n){
     if(!is_allocated){
         return ;
     }
-    head->size= real_size;
+    head->size= real_size;  
+    while(1){  //  forward coalescing adjacent free blocks
+    header_u* next_header= (header_u*)((char*)head + real_size + sizeof(header_u));
+    if((char*)next_header>=(char*)movingptr) break;  /// if next header is beyond the moving pointer, we are done
+     if(next_header->size &1) break;   // if next header is allocated, we are done
+     
+        size_t real_size_next=  next_header->size &~1;
+        real_size+=real_size_next+sizeof(header_u);
+        head->size= real_size;
+     
+    }
  }
