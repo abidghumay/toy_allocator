@@ -31,8 +31,11 @@ cursor = (header_u*)((char*)cursor + real_size + sizeof(header_u));
 
 This is a learning project, not production code. Missing features include:
 
-- Coalescing — adjacent free blocks are not merged, so fragmentation builds up over time
-- Block splitting — a 1000-byte free block given to a 16-byte request wastes 984 bytes
+- Coalescing — forward coalescing is implemented: freeing a block merges it 
+  with all consecutive free blocks ahead of it. Backward coalescing (via boundary 
+  tags) is not yet implemented.
+- Block splitting — a large free block given to a small request is not split; 
+  the remainder is wasted until the block is freed
 - Thread safety — no locks
 - **realloc / calloc**
 
