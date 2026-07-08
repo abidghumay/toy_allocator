@@ -16,6 +16,7 @@ typedef union {
     };// anonymous struct
     max_align_t _align; // ensures that the header is aligned to the maximum alignment requirement of the system
 }header_u;
+#define HEADER_SIZE sizeof(header_u)
 static int allocator_init(void){     // static means only this file can use this as its a helper function
     if(heap_start!=NULL) return 1;  // 1 for successful allocation
     header_u* p=sbrk(heap_size);
@@ -33,12 +34,18 @@ static int allocator_init(void){     // static means only this file can use this
     while(cursor!=movingptr){             // until find an eligible freed block
          size_t real_size= cursor->size &~1;
          size_t is_allocated= cursor->size & 1;
-         if(!is_allocated && real_size>=n){
+         if(!is_allocated && real_size>=n ){
+            if(real_size-n >= ALIGNMENT + HEADER_SIZE ){   // block splitting, checking if the leftover block is big enough to hold a header and at least one alignment unit of payload 
+                header_u* leftover=(header_u*)((char *)cursor + n + HEADER_SIZE); // leftover block header
+                leftover->size=(real_size-n-HEADER_SIZE)&~1;  // leftover block size, flag cleared
+                cursor->size=n|1; // this is the allocated block, flag set
+                return cursor;
+            }
             cursor->size|=1;            // flagged as allocated
             return cursor;
          }
          else{
-            cursor =(header_u*)((char*)cursor + real_size+ sizeof(header_u)); // next header 
+            cursor =(header_u*)((char*)cursor + real_size+ HEADER_SIZE); // next header 
          }
     }
     return NULL;
@@ -73,12 +80,12 @@ void * myalloc(size_t n){
     }
     head->size= real_size;  
     while(1){  //  forward coalescing adjacent free blocks
-    header_u* next_header= (header_u*)((char*)head + real_size + sizeof(header_u));
+    header_u* next_header= (header_u*)((char*)head + real_size + HEADER_SIZE);
     if((char*)next_header>=(char*)movingptr) break;  /// if next header is beyond the moving pointer, we are done
      if(next_header->size &1) break;   // if next header is allocated, we are done
      
         size_t real_size_next=  next_header->size &~1;
-        real_size+=real_size_next+sizeof(header_u);
+        real_size+=real_size_next+HEADER_SIZE;
         head->size= real_size;
      
     }

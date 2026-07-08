@@ -27,6 +27,7 @@ head->size = head->size & ~1;
 To find a reusable block, find_freed_blocks() walks from heap_start to movingptr (the boundary between initialized and fresh heap), jumping block-to-block using each header's size:
 
 cursor = (header_u*)((char*)cursor + real_size + sizeof(header_u));
+
 ## What's missing (intentionally)
 
 This is a learning project, not production code. Missing features include:
@@ -34,8 +35,8 @@ This is a learning project, not production code. Missing features include:
 - Coalescing — forward coalescing is implemented: freeing a block merges it 
   with all consecutive free blocks ahead of it. Backward coalescing (via boundary 
   tags) is not yet implemented.
-- Block splitting — a large free block given to a small request is not split; 
-  the remainder is wasted until the block is freed
+- Block splitting — a large free block given to a small request is implemented now; 
+  the remainder isnt wasted until the block is freed. DONE
 - Thread safety — no locks
 - **realloc / calloc**
 
@@ -44,4 +45,6 @@ This is a learning project, not production code. Missing features include:
 gcc -o myalloc myalloc.c
 ## Why I built this
 
-I wanted to understand what actually happens inside malloc — how the OS hands memory to userspace, how headers work, how free lists are walked, and why alignment matters. This is the result of building it from scratch rather than reading about it.
+I wanted to understand what actually happens insid
+
+e malloc — how the OS hands memory to userspace, how headers work, how free lists are walked, and why alignment matters. This is the result of building it from scratch rather than reading about it.
