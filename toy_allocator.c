@@ -18,9 +18,73 @@ typedef union {
     max_align_t _align; // ensures that the header is aligned to the maximum alignment requirement of the system
 }header_u;
 header_u * last_header=NULL;   // tracks block right behind movingptr
-#define HEADER_SIZE sizeof(header_u)
+#define HEADER_SIZE ALIGN_UP(sizeof(header_u))
 
+void validate_heap(void){
+    if(heap_start== NULL){
+        printf("not initialized yet");
+        return;
+    }
+    header_u * curr=(header_u *)heap_start;
+    header_u *prev=NULL;
+    header_u *last_seen=NULL;
+    while((void*)curr<movingptr){
+        // size cant be zero check
+        if((curr->size &~1)==0){
+            printf("[ERROR]\n size of block at %p is zero, invalid heap\n",(void*)curr);
+            return;
+        }
+        // payload alignment check
+        if((curr->size &~1)%ALIGNMENT !=0){
+            printf("[ERROR]\n payload isnt aligned at %p\n",(void*)curr);
+            return;
+        }
+        // header alignment check
+        if(((uintptr_t)curr % ALIGNMENT)!=0){
+            printf("[ERROR]\n header alignment broken\n");
+            return;
+        }
+        // prev_size consistency
+        if(prev==NULL){
+            if(curr->prev_size!=0){
+                printf("[ERROR]\n first block's prev_size isnt 0\n");
+                return;
+            }
+        }
+        else{
+            if(prev->size!=curr->prev_size){
+                printf("[ERROR]\n Block %p prev_size is wrong\n",(void*)curr);
+                printf("Expected %zu\n",prev->size);
+                printf("Found %zu\n",curr->prev_size);
+                return;
+            }
+        }
+        // next cant jump beyond used heap
+        header_u * next= (header_u*)((char*)curr +(curr->size & ~1) + HEADER_SIZE);
+        if((void*)next>movingptr){
+            printf("[ERROR]\n Block at %p jumps beyond used heap\n",(void*)curr);
+            return;
+        }
+        last_seen= curr;
+        prev=curr;
+        curr=next;
 
+    }
+    // walk ended exacty at movingptr
+    if((void *)curr!=movingptr){
+        printf("[ERROR]\n heap walk didnt end at movingptr\n");
+        return;
+    }
+
+    // last check
+    if(last_seen!=last_header){
+        printf("[ERROR]\n last header mismatch\n");
+        printf("Expected : %p\n",(void* )last_header);
+        printf("Found : %p\n",(void* )last_seen);
+        return;
+    }
+    printf("[OK] Heap validated successfully\n");
+}
 
 static int allocator_init(void){     // static means only this file can use this as its a helper function
     if(heap_start!=NULL) return 1;  // 1 for successful allocation
@@ -68,8 +132,10 @@ static header_u* find_freed_blocks(size_t n){
 
 
 void * myalloc(size_t n){
+   
     if(n==0) return NULL;
     if(!allocator_init()) return NULL;  // if heap is not initialized, initialize it
+     validate_heap();
     n= ALIGN_UP(n);  // round up to the next alignment boundary
     header_u * block= find_freed_blocks(n);
     if(block !=NULL){
@@ -87,10 +153,11 @@ void * myalloc(size_t n){
 
     movingptr=(char*)loadptr +n;
     
-    
+    validate_heap();
     return payload;
 }
  void myfree(void* payload){
+    validate_heap();
     if(payload==NULL) return;
     header_u* head= (header_u*)payload-1;
     size_t real_size= head->size &~1;// read the actual size, masking out the lowest bit
@@ -125,4 +192,5 @@ void * myalloc(size_t n){
     header_u* next_block = (header_u*)((char*)head + (head->size&~1) + HEADER_SIZE); // next block after coalescing for updating the prev_size of next block
      if((char*)next_block>=(char*)movingptr) last_header= head;
      else next_block->prev_size= head->size;
+     validate_heap();
  }
