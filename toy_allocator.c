@@ -22,7 +22,7 @@ typedef union {
 }header_u;
 header_u * last_header=NULL;   // tracks block right behind movingptr
 #define HEADER_SIZE ALIGN_UP(sizeof(header_u))
-
+#ifndef NDEBUG
 void validate_heap(void){
     if(heap_start== NULL){
         printf("not initialized yet");
@@ -88,7 +88,7 @@ void validate_heap(void){
     }
     printf("[OK] Heap validated successfully\n");
 }
-
+#endif
 static int allocator_init(void){     // static means only this file can use this as its a helper function
     if(heap_start!=NULL) return 1;  // 1 for successful allocation
     header_u* p=sbrk(heap_size);   // actually obselete in production grade allocator
