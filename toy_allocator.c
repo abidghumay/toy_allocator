@@ -1,8 +1,11 @@
+#define _DEFAULT_SOURCE       // for exposing sbrk() in unistd.h
+#include "toy_allocator.h"
 #include<stdio.h>
 #include<unistd.h>   // needed for sbrk()
 #include<stddef.h>   // gives size_t,max_align_t = (max alignment of the system usually 16 byte)
 #include<stdalign.h>  // gives alignof(T)=(how many byte alignment does T needs) and alignment related tools
 #include<stdint.h> // usefull for fixed length int like uint32_t,uint8_t. not used here
+#include<string.h>  // gives memcpy,memset
 #define heap_size (1024*1024)
 #define ALIGNMENT alignof(max_align_t) 
 #define ALIGN_UP(n) (((n)+(ALIGNMENT-1)) & ~(ALIGNMENT-1))  // rounds up to the next alignment boundary, works because alignment is power of 2
@@ -88,7 +91,7 @@ void validate_heap(void){
 
 static int allocator_init(void){     // static means only this file can use this as its a helper function
     if(heap_start!=NULL) return 1;  // 1 for successful allocation
-    header_u* p=sbrk(heap_size);
+    header_u* p=sbrk(heap_size);   // actually obselete in production grade allocator
     if(p==(void*)-1) return 0;  //on failure sbrk() returns (void*)-1, its a special error value not a memory address
 
     heap_start=p;
@@ -142,7 +145,7 @@ void * myalloc(size_t n){
         return (header_u*) block +1;  // returning payload
     }
     header_u * header= (header_u*)movingptr;
-    void* loadptr = (header_u*)movingptr +1;   // points to the payload
+    void* loadptr= (char*)movingptr + HEADER_SIZE;  // start of the payload
     if((char*)loadptr + n > (char*)heap_end) return NULL;
     void* payload= (header_u*)movingptr+ 1;  // start of the allocated payload
     header->size=n|1;// flag set(allocated)
@@ -194,3 +197,78 @@ void * myalloc(size_t n){
      else next_block->prev_size= head->size;
      validate_heap();
  }
+void * myrealloc(void * payload, size_t new_size){
+    if(payload==NULL) return myalloc(new_size);
+    if(new_size==0) {
+        myfree(payload);
+        return NULL;
+    }
+    
+    size_t old_size = (((header_u*)payload -1)->size ) &~1;
+    new_size= ALIGN_UP(new_size);
+    if(new_size==old_size) return payload;
+    if(new_size < old_size){  
+                     // shrink
+            
+            
+            if(old_size - new_size >= HEADER_SIZE + ALIGNMENT){  // if splitting possible otherwise return as it is
+                ((header_u*)payload -1)-> size =new_size|1;
+                header_u * leftover_header= (header_u*)((char*)payload + ((new_size) & ~1));
+                leftover_header->size = (old_size-new_size -HEADER_SIZE) ;
+                leftover_header->prev_size=new_size |1;
+                header_u* next_block = (header_u*)((char*)payload + (old_size &~1)  ); 
+                if((char*)next_block >=(char*)movingptr) last_header = leftover_header;
+                else next_block->prev_size = leftover_header->size;     
+                       
+            }
+            return payload;
+    }
+    if(new_size > old_size ){
+       header_u* next_block = (header_u*)((char*)payload + (old_size &~1)  ); 
+       if((char*)next_block>=(char*)movingptr){   // in place groeing for last block
+            size_t extra= new_size-old_size;
+            if((char*)movingptr + extra<=(char*)heap_end){
+                ((header_u*)payload -1)-> size =new_size|1;
+                movingptr= (char*)movingptr + extra;
+                last_header=((header_u*)payload -1);
+                return payload;
+
+            }
+            goto allocate_new;
+       }
+       if(!(next_block->size &1) && (old_size+ (next_block->size & ~1) + HEADER_SIZE)>=new_size){   // in place growing
+            
+            if(next_block->size -(new_size-old_size-HEADER_SIZE)>=HEADER_SIZE+ALIGNMENT){       // to split or not to split
+                ((header_u*)payload -1)-> size =new_size|1;
+                 header_u * leftover_header= (header_u*)((char*)payload + (new_size & ~1));
+                 leftover_header->size = (next_block->size -(new_size-old_size-HEADER_SIZE)-HEADER_SIZE) ;
+                 leftover_header->prev_size=new_size |1;
+                 header_u* new_next_block = (header_u*)((char*)payload+ (new_size &~1)+HEADER_SIZE +leftover_header->size  ); 
+                 if((char*)new_next_block >=(char*)movingptr) last_header = leftover_header;
+                 else new_next_block->prev_size = leftover_header->size; 
+
+
+            }
+            else{
+                ((header_u*)payload -1)-> size =(old_size+ next_block->size + HEADER_SIZE) | 1;
+                header_u * new_next_block = (header_u*)((char*)payload + (old_size & ~1) + HEADER_SIZE + next_block->size );
+                if((char*)new_next_block >=(char*)movingptr) last_header = ((header_u*)payload -1);
+                 else new_next_block->prev_size =  (old_size+ next_block->size + HEADER_SIZE) | 1 ; 
+                 
+                
+            }
+           return payload; 
+
+       }
+       else{       // new allocation
+          allocate_new: {
+          void* new_place =(myalloc(new_size));
+          if(new_place==NULL) return NULL;
+          memcpy(new_place, payload, old_size );
+          myfree(payload);
+          return new_place;
+          }
+       }
+    }
+    return NULL; // should never reach here
+}
