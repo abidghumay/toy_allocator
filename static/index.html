@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Toy Heap Allocator Visualizer</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Top Navigation / Header -->
+        <header class="app-header">
+            <div class="header-left">
+                <div class="logo-badge">
+                    <span class="logo-icon">📦</span>
+                    <div class="logo-text">
+                        <h1>Toy Allocator <span class="highlight">Visualizer</span></h1>
+                        <p class="subtitle">Implicit Free List • First-Fit • Splitting • Coalescing via prev_size</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="header-center">
+                <div class="stats-card">
+                    <div class="stat-item">
+                        <span class="stat-label">Used Heap</span>
+                        <span class="stat-value" id="stat-used">0 B</span>
+                    </div>
+                    <div class="stat-divider"></div>
+                    <div class="stat-item">
+                        <span class="stat-label">Total Blocks</span>
+                        <span class="stat-value" id="stat-blocks">0</span>
+                    </div>
+                    <div class="stat-divider"></div>
+                    <div class="stat-item">
+                        <span class="stat-label">Allocated</span>
+                        <span class="stat-value text-allocated" id="stat-allocated">0 B</span>
+                    </div>
+                    <div class="stat-divider"></div>
+                    <div class="stat-item">
+                        <span class="stat-label">Free In Heap</span>
+                        <span class="stat-value text-free" id="stat-free">0 B</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="header-right">
+                <button id="btn-run-demo" class="btn btn-primary" title="Recompile and run demo.c to regenerate event log">
+                    <span class="btn-icon">⚡</span> Run Demo
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Visualization Stage -->
+        <main class="main-content">
+            <!-- Active Step Callout Banner -->
+            <section class="action-banner" id="action-banner">
+                <div class="badge-container">
+                    <span class="step-badge" id="banner-step">Step 0/0</span>
+                    <span class="event-badge" id="banner-event">READY</span>
+                </div>
+                <div class="call-display">
+                    <code id="banner-call">Waiting for events...</code>
+                </div>
+                <div class="desc-display">
+                    <p id="banner-desc">Load or run the demo program to begin visualizing heap allocations.</p>
+                </div>
+            </section>
+
+            <!-- Heap Strip Container -->
+            <section class="heap-stage">
+                <div class="stage-header">
+                    <div class="stage-title">
+                        <h2>Heap Memory Layout</h2>
+                        <span class="heap-range" id="heap-range-label">0x000000000000 → 0x000000000000</span>
+                    </div>
+                    <div class="stage-legend">
+                        <span class="legend-item"><span class="legend-color color-alloc"></span> Allocated</span>
+                        <span class="legend-item"><span class="legend-color color-free"></span> Free</span>
+                        <span class="legend-item"><span class="legend-color color-split"></span> Just Split</span>
+                        <span class="legend-item"><span class="legend-color color-coalesce"></span> Just Coalesced</span>
+                        <span class="legend-item"><span class="legend-color color-freed"></span> Just Freed</span>
+                    </div>
+                </div>
+
+                <!-- Visual Horizontal Strip of Blocks -->
+                <div class="heap-strip-wrapper">
+                    <div class="heap-strip" id="heap-strip">
+                        <!-- Dynamic heap blocks injected here -->
+                    </div>
+                </div>
+
+                <!-- Bump Pointer / Free Heap Visualizer -->
+                <div class="bump-tracker">
+                    <div class="bump-used-bar" id="bump-used-bar"></div>
+                    <div class="bump-info">
+                        <span class="bump-label"><span class="arrow-up">▲</span> <code>movingptr</code> (Bump boundary)</span>
+                        <span class="bump-remaining" id="bump-remaining-label">1MB capacity remaining</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Interactive Inspector & Detailed Info -->
+            <div class="two-column-grid">
+                <!-- Selected Block Inspector -->
+                <section class="card inspector-card">
+                    <div class="card-header">
+                        <h3>🔍 Block Inspector</h3>
+                        <span class="badge" id="inspector-status-badge">Select a block</span>
+                    </div>
+                    <div class="card-body" id="inspector-body">
+                        <div class="empty-state" id="inspector-empty">
+                            <p>Click on any block in the heap strip above to inspect its 16-byte header, size flags, payload, and prev_size.</p>
+                        </div>
+                        <div class="inspector-details hidden" id="inspector-details">
+                            <div class="inspector-row">
+                                <span class="label">Header Address:</span>
+                                <span class="value mono" id="insp-header-addr">-</span>
+                            </div>
+                            <div class="inspector-row">
+                                <span class="label">Payload Address:</span>
+                                <span class="value mono" id="insp-payload-addr">-</span>
+                            </div>
+                            <div class="inspector-row">
+                                <span class="label">Heap Offset:</span>
+                                <span class="value mono" id="insp-offset">-</span>
+                            </div>
+                            <div class="inspector-row">
+                                <span class="label">Payload Size:</span>
+                                <span class="value" id="insp-payload-size">-</span>
+                            </div>
+                            <div class="inspector-row">
+                                <span class="label">Total Size (incl. 16B header):</span>
+                                <span class="value" id="insp-total-size">-</span>
+                            </div>
+                            <div class="inspector-row">
+                                <span class="label">Status:</span>
+                                <span class="value" id="insp-status">-</span>
+                            </div>
+                            <div class="inspector-row">
+                                <span class="label">prev_size field:</span>
+                                <span class="value" id="insp-prev-size">-</span>
+                            </div>
+                            <div class="inspector-row">
+                                <span class="label">prev_size allocated flag:</span>
+                                <span class="value" id="insp-prev-alloc">-</span>
+                            </div>
+
+                            <!-- Visual Block Breakdown Diagram -->
+                            <div class="block-architecture">
+                                <div class="arch-header">Block Structure (16-byte aligned)</div>
+                                <div class="arch-bar">
+                                    <div class="arch-part arch-hdr" title="16-byte Header (size + prev_size)">
+                                        <span>Header<br>(16B)</span>
+                                    </div>
+                                    <div class="arch-part arch-payload" id="arch-payload-bar" title="Payload Area">
+                                        <span id="arch-payload-text">Payload (N bytes)</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Event History & Step Timeline -->
+                <section class="card timeline-card">
+                    <div class="card-header">
+                        <h3>📜 Event Timeline</h3>
+                        <span class="count-badge" id="event-count-badge">0 events</span>
+                    </div>
+                    <div class="card-body timeline-list" id="timeline-list">
+                        <!-- Timeline entries injected here -->
+                    </div>
+                </section>
+            </div>
+        </main>
+
+        <!-- Bottom Playback Control Bar -->
+        <footer class="controls-bar">
+            <div class="controls-group left">
+                <button id="btn-first" class="btn btn-icon-only" title="Jump to start (Home)">⏮</button>
+                <button id="btn-prev" class="btn btn-icon-only" title="Previous Step (Left Arrow)">◀</button>
+                <button id="btn-play" class="btn btn-accent btn-play" title="Play / Pause (Spacebar)">
+                    <span id="play-icon">▶</span>
+                </button>
+                <button id="btn-next" class="btn btn-icon-only" title="Next Step (Right Arrow)">▶</button>
+                <button id="btn-last" class="btn btn-icon-only" title="Jump to end (End)">⏭</button>
+            </div>
+
+            <div class="controls-group center scrubber-group">
+                <span class="scrub-label" id="scrub-current">0</span>
+                <input type="range" id="scrubber" min="0" max="0" value="0" class="scrubber-slider" title="Drag to scrub through execution">
+                <span class="scrub-label" id="scrub-total">0</span>
+            </div>
+
+            <div class="controls-group right speed-group">
+                <span class="control-label">Speed:</span>
+                <div class="speed-buttons">
+                    <button class="btn btn-speed" data-speed="1500">0.5x</button>
+                    <button class="btn btn-speed active" data-speed="800">1x</button>
+                    <button class="btn btn-speed" data-speed="400">2x</button>
+                    <button class="btn btn-speed" data-speed="200">4x</button>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>

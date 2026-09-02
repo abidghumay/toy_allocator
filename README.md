@@ -78,11 +78,24 @@ gcc -o allocator toy_allocator.c
 ./allocator
 ```
 
+## Visualizer
+
+An interactive browser-based visualizer that renders the heap as a strip of proportional blocks with animated transitions for allocations, block splitting, and coalescing.
+
+```bash
+# Build and run the showcase demo to generate the event trace
+make run-demo
+
+# Start the visualization server
+make serve
+# Open http://localhost:5000 in your browser
+```
+
+The visualizer instrumentation is optional (compile-time flag `-DTOY_VISUALIZE`), ensuring zero overhead when running benchmarks.
+
 ## Benchmark
 
 `bench.c` compares `myalloc`/`myfree` against glibc `malloc`/`free` over 5000 rounds of 200 allocations (sizes 1–256 bytes).
-
-> `bench.c` was written with LLM assistance for the benchmark harness.
 
 ```bash
 # with heap validation (expect ~1500x slower — measures validator not allocator)
@@ -120,6 +133,12 @@ This is a learning project, not production code:
 - **First-fit search** — slow on large heaps; real allocators use size-class free lists (tcache, jemalloc bins)
 - **`sbrk()`-based** — deprecated on modern Linux; large allocations should use `mmap`
 - **Single 1MB heap** — not growable beyond that
+
+## Notes & Attribution
+
+- **Core Allocator**: The core allocator logic (`toy_allocator.c` and `toy_allocator.h`) was written completely from scratch in C to deeply understand how memory allocators work under the hood.
+- **Visualizer**: The Python visualizer backend and animated browser frontend (`server.py`, `static/`, and logging instrumentation) were created with the help of Gemini.
+- **Benchmark**: `bench.c` was written with LLM assistance for the benchmark harness.
 
 ## Why I built this
 

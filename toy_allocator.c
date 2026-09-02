@@ -1,5 +1,6 @@
 #define _DEFAULT_SOURCE       // for exposing sbrk() in unistd.h
 #include "toy_allocator.h"
+#include "toy_logger.h"
 #include<stdio.h>
 #include<unistd.h>   // needed for sbrk()
 #include<stddef.h>   // gives size_t,max_align_t = (max alignment of the system usually 16 byte)
@@ -97,6 +98,9 @@ static int allocator_init(void){     // static means only this file can use this
     heap_start=p;
     heap_end=(char*)p+heap_size;
     movingptr= heap_start;
+#ifdef TOY_VISUALIZE
+    LOG_INIT(heap_start, movingptr, heap_end);
+#endif
     return 1;
 }
 
@@ -117,12 +121,32 @@ static header_u* find_freed_blocks(size_t n){
                 header_u* temp=(header_u*)((char*)cursor + real_size+ HEADER_SIZE); 
                 if(temp==movingptr) last_header=leftover;
                 else temp->prev_size=leftover->size;
+#ifdef TOY_VISUALIZE
+                {
+                    char call_str[64];
+                    snprintf(call_str, sizeof(call_str), "myalloc(%zu) [Split]", n);
+                    char desc[180];
+                    snprintf(desc, sizeof(desc), "Found free block at %p (%zu B). Split into %zu B allocated and %zu B free leftover.",
+                             (void*)cursor, real_size, n, leftover->size & ~1);
+                    LOG_SPLIT(cursor, leftover, n, leftover->size & ~1, call_str, desc, heap_start, movingptr, heap_end);
+                }
+#endif
                 return cursor;
             }
             cursor->size|=1;            // flagged as allocated
             header_u * temp= (header_u*)((char*)cursor + real_size+ HEADER_SIZE);
             if((char*)temp<(char*)movingptr) temp->prev_size=cursor->size;
             else last_header= cursor;
+#ifdef TOY_VISUALIZE
+            {
+                char call_str[64];
+                snprintf(call_str, sizeof(call_str), "myalloc(%zu) [Reused]", n);
+                char desc[180];
+                snprintf(desc, sizeof(desc), "Reused entire free block at %p (%zu B). Marked allocated.",
+                         (void*)cursor, real_size);
+                LOG_ALLOC(cursor, real_size, call_str, desc, heap_start, movingptr, heap_end);
+            }
+#endif
             return cursor;
          }
          else{
@@ -156,6 +180,17 @@ void * myalloc(size_t n){
 
     movingptr=(char*)loadptr +n;
     
+#ifdef TOY_VISUALIZE
+    {
+        char call_str[64];
+        snprintf(call_str, sizeof(call_str), "myalloc(%zu)", n);
+        char desc[180];
+        snprintf(desc, sizeof(desc), "Bump allocated %zu bytes at %p (payload %p).",
+                 n, (void*)header, payload);
+        LOG_ALLOC(header, n, call_str, desc, heap_start, movingptr, heap_end);
+    }
+#endif
+
     validate_heap();
     return payload;
 }
@@ -169,14 +204,35 @@ void * myalloc(size_t n){
         return ;
     }
     head->size= real_size;  
+#ifdef TOY_VISUALIZE
+    {
+        char call_str[64];
+        snprintf(call_str, sizeof(call_str), "myfree(%p)", payload);
+        char desc[180];
+        snprintf(desc, sizeof(desc), "Freed block at %p (size %zu B). Flag cleared to free.",
+                 (void*)head, real_size);
+        LOG_FREE(head, real_size, call_str, desc, heap_start, movingptr, heap_end);
+    }
+#endif
     while(1){  //  forward coalescing adjacent free blocks
     header_u* next_header= (header_u*)((char*)head + real_size + HEADER_SIZE);
     if((char*)next_header>=(char*)movingptr) break;  /// if next header is beyond the moving pointer, we are done
      if(next_header->size &1) break;   // if next header is allocated, we are done
      
         size_t real_size_next=  next_header->size &~1;
+#ifdef TOY_VISUALIZE
+        size_t old_size = real_size;
+#endif
         real_size+=real_size_next+HEADER_SIZE;
         head->size= real_size;
+#ifdef TOY_VISUALIZE
+        {
+            char fdesc[180];
+            snprintf(fdesc, sizeof(fdesc), "Forward coalesced with next free block at %p (%zu B). Merged size: %zu B.",
+                     (void*)next_header, real_size_next, real_size);
+            LOG_COALESCE_FWD(head, next_header, old_size, real_size, fdesc, heap_start, movingptr, heap_end);
+        }
+#endif
      
     }
     // backward coalescing
@@ -186,7 +242,19 @@ void * myalloc(size_t n){
      size_t is_prev_free= head->prev_size & 1;
      if(!is_prev_free){
         header_u * prev_header=(header_u*)((char*)head - (head->prev_size&~1) - HEADER_SIZE); // going back to the previous header
-        prev_header->size= head->size+(head->prev_size&~1 )+ HEADER_SIZE;
+#ifdef TOY_VISUALIZE
+        size_t old_head_size = head->size & ~1;
+#endif
+        size_t new_size = head->size+(head->prev_size&~1 )+ HEADER_SIZE;
+        prev_header->size= new_size;
+#ifdef TOY_VISUALIZE
+        {
+            char bdesc[180];
+            snprintf(bdesc, sizeof(bdesc), "Backward coalesced into previous free block at %p (%zu B). Merged size: %zu B.",
+                     (void*)prev_header, head->prev_size & ~1, new_size);
+            LOG_COALESCE_BWD(head, prev_header, old_head_size, new_size, bdesc, heap_start, movingptr, heap_end);
+        }
+#endif
         head=prev_header;                                                        // now head points to the previous header, which is now the coalesced block
     
      }
@@ -219,7 +287,14 @@ void * myrealloc(void * payload, size_t new_size){
                 header_u* next_block = (header_u*)((char*)payload + (old_size &~1)  ); 
                 if((char*)next_block >=(char*)movingptr) last_header = leftover_header;
                 else next_block->prev_size = leftover_header->size;     
-                       
+#ifdef TOY_VISUALIZE
+                {
+                    char rdesc[180];
+                    snprintf(rdesc, sizeof(rdesc), "myrealloc shrank block from %zu to %zu B; leftover %zu B made free.",
+                             old_size, new_size, leftover_header->size);
+                    LOG_SPLIT(((header_u*)payload - 1), leftover_header, new_size, leftover_header->size, "myrealloc() [Shrink Split]", rdesc, heap_start, movingptr, heap_end);
+                }
+#endif
             }
             return payload;
     }
@@ -231,6 +306,13 @@ void * myrealloc(void * payload, size_t new_size){
                 ((header_u*)payload -1)-> size =new_size|1;
                 movingptr= (char*)movingptr + extra;
                 last_header=((header_u*)payload -1);
+#ifdef TOY_VISUALIZE
+                {
+                    char rdesc[180];
+                    snprintf(rdesc, sizeof(rdesc), "myrealloc extended last block in-place to %zu B.", new_size);
+                    LOG_REALLOC(((header_u*)payload - 1), new_size, "myrealloc() [Extend]", rdesc, heap_start, movingptr, heap_end);
+                }
+#endif
                 return payload;
 
             }
